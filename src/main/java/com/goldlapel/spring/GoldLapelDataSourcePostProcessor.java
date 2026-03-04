@@ -6,6 +6,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.core.env.Environment;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
@@ -13,10 +17,16 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
     private static final String JDBC_PREFIX = "jdbc:";
     private static final String JDBC_PG_PREFIX = "jdbc:postgresql://";
 
-    private final GoldLapelProperties properties;
+    private final Environment environment;
+    private final List<GoldLapel> proxies = new ArrayList<>();
 
-    public GoldLapelDataSourcePostProcessor(GoldLapelProperties properties) {
-        this.properties = properties;
+    public GoldLapelDataSourcePostProcessor(Environment environment) {
+        this.environment = environment;
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            for (GoldLapel proxy : proxies) {
+                proxy.stopProxy();
+            }
+        }));
     }
 
     @Override
@@ -32,20 +42,36 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
         String upstream = jdbcUrl.substring(JDBC_PREFIX.length());
 
-        GoldLapel.Options options = new GoldLapel.Options()
-                .port(properties.getPort());
+        int port = environment.getProperty("goldlapel.port", Integer.class, 7932);
+        String extraArgsStr = environment.getProperty("goldlapel.extra-args", "");
 
-        if (!properties.getExtraArgs().isEmpty()) {
-            options.extraArgs(properties.getExtraArgs().toArray(new String[0]));
+        GoldLapel.Options options = new GoldLapel.Options().port(port);
+
+        if (!extraArgsStr.isEmpty()) {
+            options.extraArgs(extraArgsStr.split(","));
         }
 
-        String proxyUrl = GoldLapel.start(upstream, options);
-        String proxyJdbcUrl = JDBC_PREFIX + proxyUrl;
+        GoldLapel proxy = new GoldLapel(upstream, options);
+        String proxyUrl;
+        try {
+            proxyUrl = proxy.startProxy();
+        } catch (RuntimeException e) {
+            throw new RuntimeException(
+                    "Gold Lapel failed to start proxy for datasource '" + beanName +
+                    "' (upstream: " + upstream + ", port: " + port + ")", e);
+        }
 
+        proxies.add(proxy);
+        String proxyJdbcUrl = JDBC_PREFIX + proxyUrl;
         ds.setJdbcUrl(proxyJdbcUrl);
 
-        log.info("Gold Lapel proxy started — {} now routes through localhost:{}", beanName, properties.getPort());
+        log.info("Gold Lapel proxy started — {} now routes through localhost:{}", beanName, port);
 
         return ds;
+    }
+
+    // Visible for testing
+    List<GoldLapel> getProxies() {
+        return proxies;
     }
 }
