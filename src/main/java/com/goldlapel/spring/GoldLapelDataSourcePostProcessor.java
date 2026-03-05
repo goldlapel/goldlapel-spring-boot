@@ -56,9 +56,10 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
         try {
             proxyUrl = proxy.startProxy();
         } catch (RuntimeException e) {
+            String safeUpstream = upstream.replaceAll("://.*@", "://***@");
             throw new RuntimeException(
                     "Gold Lapel failed to start proxy for datasource '" + beanName +
-                    "' (upstream: " + upstream + ", port: " + port + ")", e);
+                    "' (upstream: " + safeUpstream + ", port: " + port + ")", e);
         }
 
         proxies.add(proxy);
