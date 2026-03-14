@@ -9,6 +9,10 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
@@ -53,7 +57,7 @@ class GoldLapelAutoConfigurationTest {
             ds.setJdbcUrl("jdbc:h2:mem:testdb");
 
             GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(
-                    mock(org.springframework.core.env.Environment.class));
+                    new GoldLapelProperties());
 
             Object result = processor.postProcessAfterInitialization(ds, "dataSource");
 
@@ -105,11 +109,8 @@ class GoldLapelAutoConfigurationTest {
             HikariDataSource ds2 = new HikariDataSource();
             ds2.setJdbcUrl("jdbc:postgresql://host2:5433/db2");
 
-            org.springframework.core.env.Environment env = mock(org.springframework.core.env.Environment.class);
-            when(env.getProperty("goldlapel.port", Integer.class, 7932)).thenReturn(7932);
-            when(env.getProperty("goldlapel.extra-args", "")).thenReturn("");
-
-            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(env);
+            GoldLapelProperties props = new GoldLapelProperties();
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
 
             processor.postProcessAfterInitialization(ds1, "primaryDataSource");
             processor.postProcessAfterInitialization(ds2, "analyticsDataSource");
@@ -123,5 +124,113 @@ class GoldLapelAutoConfigurationTest {
 
             assertThat(processor.getProxies()).hasSize(2);
         }
+    }
+
+    @Test
+    void configMapPassedToOptions() {
+        List<MockedConstruction.Context> capturedContexts = new ArrayList<>();
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> {
+                    capturedContexts.add(context);
+                    when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb");
+                })) {
+
+            dataSourceRunner.withPropertyValues(
+                            "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
+                            "spring.datasource.driver-class-name=org.postgresql.Driver",
+                            "goldlapel.config.mode=butler",
+                            "goldlapel.config.pool-size=30")
+                    .run(context -> {
+                        assertThat(context).hasSingleBean(GoldLapelDataSourcePostProcessor.class);
+                        HikariDataSource ds = context.getBean(HikariDataSource.class);
+                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        assertThat(mocked.constructed()).hasSize(1);
+                        verify(mocked.constructed().get(0)).startProxy();
+
+                        // Verify GoldLapel was constructed with Options containing the config map
+                        assertThat(capturedContexts).hasSize(1);
+                        GoldLapel.Options options = (GoldLapel.Options) capturedContexts.get(0).arguments().get(1);
+                        assertThat(options.config()).containsEntry("mode", "butler");
+                        assertThat(options.config()).containsEntry("poolSize", "30");
+                    });
+        }
+    }
+
+    @Test
+    void configMapWithCamelCaseKeysFromYaml() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            dataSourceRunner.withPropertyValues(
+                            "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
+                            "spring.datasource.driver-class-name=org.postgresql.Driver",
+                            "goldlapel.config.poolSize=25",
+                            "goldlapel.config.disableN1=true")
+                    .run(context -> {
+                        HikariDataSource ds = context.getBean(HikariDataSource.class);
+                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        assertThat(mocked.constructed()).hasSize(1);
+                        verify(mocked.constructed().get(0)).startProxy();
+                    });
+        }
+    }
+
+    @Test
+    void configMapWithPortAndExtraArgs() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:9000/testdb"))) {
+
+            dataSourceRunner.withPropertyValues(
+                            "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
+                            "spring.datasource.driver-class-name=org.postgresql.Driver",
+                            "goldlapel.port=9000",
+                            "goldlapel.config.mode=butler",
+                            "goldlapel.extra-args=--verbose")
+                    .run(context -> {
+                        HikariDataSource ds = context.getBean(HikariDataSource.class);
+                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:9000/testdb");
+                        assertThat(mocked.constructed()).hasSize(1);
+                        verify(mocked.constructed().get(0)).startProxy();
+                    });
+        }
+    }
+
+    @Test
+    void emptyConfigMapDoesNotSetConfig() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            dataSourceRunner.withPropertyValues(
+                            "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
+                            "spring.datasource.driver-class-name=org.postgresql.Driver")
+                    .run(context -> {
+                        HikariDataSource ds = context.getBean(HikariDataSource.class);
+                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        assertThat(mocked.constructed()).hasSize(1);
+                        verify(mocked.constructed().get(0)).startProxy();
+                    });
+        }
+    }
+
+    @Test
+    void kebabToCamelConversion() {
+        assertThat(GoldLapelDataSourcePostProcessor.kebabToCamel("pool-size")).isEqualTo("poolSize");
+        assertThat(GoldLapelDataSourcePostProcessor.kebabToCamel("disable-n1")).isEqualTo("disableN1");
+        assertThat(GoldLapelDataSourcePostProcessor.kebabToCamel("mode")).isEqualTo("mode");
+        assertThat(GoldLapelDataSourcePostProcessor.kebabToCamel("read-after-write-secs")).isEqualTo("readAfterWriteSecs");
+        assertThat(GoldLapelDataSourcePostProcessor.kebabToCamel("disable-n1-cross-connection")).isEqualTo("disableN1CrossConnection");
+    }
+
+    @Test
+    void normalizeCamelCaseConvertsMap() {
+        Map<String, String> input = Map.of(
+                "pool-size", "30",
+                "mode", "butler",
+                "disable-n1", "true"
+        );
+        Map<String, Object> result = GoldLapelDataSourcePostProcessor.normalizeCamelCase(input);
+        assertThat(result).containsEntry("poolSize", "30");
+        assertThat(result).containsEntry("mode", "butler");
+        assertThat(result).containsEntry("disableN1", "true");
     }
 }

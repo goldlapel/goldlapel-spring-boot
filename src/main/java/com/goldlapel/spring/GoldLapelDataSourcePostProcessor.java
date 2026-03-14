@@ -6,10 +6,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
-import org.springframework.core.env.Environment;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
@@ -17,11 +18,11 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
     private static final String JDBC_PREFIX = "jdbc:";
     private static final String JDBC_PG_PREFIX = "jdbc:postgresql://";
 
-    private final Environment environment;
+    private final GoldLapelProperties properties;
     private final List<GoldLapel> proxies = new ArrayList<>();
 
-    public GoldLapelDataSourcePostProcessor(Environment environment) {
-        this.environment = environment;
+    public GoldLapelDataSourcePostProcessor(GoldLapelProperties properties) {
+        this.properties = properties;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             for (GoldLapel proxy : proxies) {
                 proxy.stopProxy();
@@ -42,12 +43,17 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
         String upstream = jdbcUrl.substring(JDBC_PREFIX.length());
 
-        int port = environment.getProperty("goldlapel.port", Integer.class, 7932);
-        String extraArgsStr = environment.getProperty("goldlapel.extra-args", "");
+        int port = properties.getPort();
+        String extraArgsStr = properties.getExtraArgs();
+        Map<String, String> configMap = properties.getConfig();
 
         GoldLapel.Options options = new GoldLapel.Options().port(port);
 
-        if (!extraArgsStr.isEmpty()) {
+        if (configMap != null && !configMap.isEmpty()) {
+            options.config(normalizeCamelCase(configMap));
+        }
+
+        if (extraArgsStr != null && !extraArgsStr.isEmpty()) {
             options.extraArgs(extraArgsStr.split(","));
         }
 
@@ -74,5 +80,35 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
     // Visible for testing
     List<GoldLapel> getProxies() {
         return proxies;
+    }
+
+    // Convert kebab-case keys to camelCase so both property styles work:
+    //   goldlapel.config.pool-size=30   -> poolSize
+    //   goldlapel.config.poolSize: 30   -> poolSize (already camelCase)
+    static Map<String, Object> normalizeCamelCase(Map<String, String> input) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : input.entrySet()) {
+            result.put(kebabToCamel(entry.getKey()), entry.getValue());
+        }
+        return result;
+    }
+
+    static String kebabToCamel(String key) {
+        if (!key.contains("-")) {
+            return key;
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean upper = false;
+        for (char c : key.toCharArray()) {
+            if (c == '-') {
+                upper = true;
+            } else if (upper) {
+                sb.append(Character.toUpperCase(c));
+                upper = false;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 }

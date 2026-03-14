@@ -23,6 +23,11 @@ Optional proxy settings via `application.yml`:
 ```yaml
 goldlapel:
   port: 9000                    # proxy listen port (default: 7932)
+  config:
+    mode: butler                # bellhop (free) or butler (paid)
+    pool-size: 30               # upstream connection pool size
+    disable-n1: true            # disable N+1 detection
+    refresh-interval-secs: 120  # matview refresh interval
   extra-args:
     - "--threshold-duration-ms"
     - "200"
@@ -32,8 +37,14 @@ Or `application.properties`:
 
 ```properties
 goldlapel.port=9000
+goldlapel.config.mode=butler
+goldlapel.config.pool-size=30
+goldlapel.config.disable-n1=true
+goldlapel.config.refresh-interval-secs=120
 goldlapel.extra-args=--threshold-duration-ms,200
 ```
+
+The `config` map accepts any Gold Lapel CLI flag as a camelCase key. Spring Boot's relaxed binding means `pool-size`, `poolSize`, and `POOL_SIZE` all work. Keys are normalized to camelCase before being passed to the proxy.
 
 To disable Gold Lapel without removing the dependency:
 
