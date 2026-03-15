@@ -8,6 +8,7 @@ import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,15 +83,46 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
         return proxies;
     }
 
-    // Convert kebab-case keys to camelCase so both property styles work:
-    //   goldlapel.config.pool-size=30   -> poolSize
-    //   goldlapel.config.poolSize: 30   -> poolSize (already camelCase)
+    // Convert kebab-case keys to camelCase and coerce String values to their
+    // native types so the Java wrapper's configToArgs() gets what it expects.
+    //
+    // Spring Boot YAML properties always arrive as Strings (e.g. "true" not true),
+    // but the wrapper does instanceof Boolean / instanceof List checks.
+    //
+    //   goldlapel.config.pool-size=30        -> poolSize: "30"       (stays String)
+    //   goldlapel.config.disable-n1=true      -> disableN1: true     (Boolean)
+    //   goldlapel.config.exclude-tables=a,b   -> excludeTables: ["a","b"] (List)
     static Map<String, Object> normalizeCamelCase(Map<String, String> input) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : input.entrySet()) {
-            result.put(kebabToCamel(entry.getKey()), entry.getValue());
+            result.put(kebabToCamel(entry.getKey()), coerceValue(entry.getValue()));
         }
         return result;
+    }
+
+    // Coerce Spring Boot String property values to the native types the Java
+    // wrapper expects:
+    //   "true" / "false"  -> Boolean  (for boolean flag keys like disableN1)
+    //   "a,b,c"           -> List     (for list keys like excludeTables, replica)
+    //   everything else   -> String   (numeric values stay as strings; the wrapper
+    //                                  calls .toString() on them anyway)
+    static Object coerceValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.equalsIgnoreCase("true")) {
+            return Boolean.TRUE;
+        }
+        if (value.equalsIgnoreCase("false")) {
+            return Boolean.FALSE;
+        }
+        if (value.contains(",")) {
+            return Arrays.stream(value.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+        }
+        return value;
     }
 
     static String kebabToCamel(String key) {

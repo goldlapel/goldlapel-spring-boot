@@ -231,6 +231,63 @@ class GoldLapelAutoConfigurationTest {
         Map<String, Object> result = GoldLapelDataSourcePostProcessor.normalizeCamelCase(input);
         assertThat(result).containsEntry("poolSize", "30");
         assertThat(result).containsEntry("mode", "butler");
-        assertThat(result).containsEntry("disableN1", "true");
+        assertThat(result).containsEntry("disableN1", Boolean.TRUE);
+    }
+
+    @Test
+    void coerceValueConvertsBooleanStrings() {
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("true")).isEqualTo(Boolean.TRUE);
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("True")).isEqualTo(Boolean.TRUE);
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("TRUE")).isEqualTo(Boolean.TRUE);
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("false")).isEqualTo(Boolean.FALSE);
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("False")).isEqualTo(Boolean.FALSE);
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("FALSE")).isEqualTo(Boolean.FALSE);
+    }
+
+    @Test
+    void coerceValueSplitsCommaSeparatedStrings() {
+        Object result = GoldLapelDataSourcePostProcessor.coerceValue("users,orders,products");
+        assertThat(result).isEqualTo(List.of("users", "orders", "products"));
+    }
+
+    @Test
+    void coerceValueSplitsCommaSeparatedWithSpaces() {
+        Object result = GoldLapelDataSourcePostProcessor.coerceValue("users , orders , products");
+        assertThat(result).isEqualTo(List.of("users", "orders", "products"));
+    }
+
+    @Test
+    void coerceValueLeavesPlainStringsAlone() {
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("butler")).isEqualTo("butler");
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("30")).isEqualTo("30");
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("redis://localhost:6379")).isEqualTo("redis://localhost:6379");
+    }
+
+    @Test
+    void coerceValueHandlesNull() {
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue(null)).isNull();
+    }
+
+    @Test
+    void coerceValueHandlesTrailingComma() {
+        Object result = GoldLapelDataSourcePostProcessor.coerceValue("users,orders,");
+        assertThat(result).isEqualTo(List.of("users", "orders"));
+    }
+
+    @Test
+    void normalizeCamelCaseCoercesBooleanAndListValues() {
+        Map<String, String> input = Map.of(
+                "disable-n1", "true",
+                "enable-coalescing", "false",
+                "exclude-tables", "users,orders",
+                "pool-size", "30",
+                "mode", "butler"
+        );
+        Map<String, Object> result = GoldLapelDataSourcePostProcessor.normalizeCamelCase(input);
+        assertThat(result).containsEntry("disableN1", Boolean.TRUE);
+        assertThat(result).containsEntry("enableCoalescing", Boolean.FALSE);
+        assertThat(result).containsEntry("excludeTables", List.of("users", "orders"));
+        assertThat(result).containsEntry("poolSize", "30");
+        assertThat(result).containsEntry("mode", "butler");
     }
 }
