@@ -67,7 +67,7 @@
         <dependency>
             <groupId>com.goldlapel</groupId>
             <artifactId>goldlapel</artifactId>
-            <version>0.1.0</version>
+            <version>${project.version}</version>
         </dependency>
 
         <!-- Spring Boot auto-configuration -->
