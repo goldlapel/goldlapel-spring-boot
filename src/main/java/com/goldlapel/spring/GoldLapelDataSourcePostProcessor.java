@@ -58,6 +58,7 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
             options.extraArgs(extraArgsStr.split(","));
         }
 
+        options.client("spring-boot");
         GoldLapel proxy = new GoldLapel(upstream, options);
         String proxyUrl;
         try {
