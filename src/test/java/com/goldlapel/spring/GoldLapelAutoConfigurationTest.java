@@ -260,7 +260,7 @@ class GoldLapelAutoConfigurationTest {
     void coerceValueLeavesPlainStringsAlone() {
         assertThat(GoldLapelDataSourcePostProcessor.coerceValue("butler")).isEqualTo("butler");
         assertThat(GoldLapelDataSourcePostProcessor.coerceValue("30")).isEqualTo("30");
-        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("redis://localhost:6379")).isEqualTo("redis://localhost:6379");
+        assertThat(GoldLapelDataSourcePostProcessor.coerceValue("postgresql://localhost:5432")).isEqualTo("postgresql://localhost:5432");
     }
 
     @Test
