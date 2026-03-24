@@ -11,6 +11,8 @@ public class GoldLapelProperties {
     private boolean enabled = true;
     private int port = 7932;
     private String extraArgs = "";
+    private int invalidationPort = 0;
+    private boolean nativeCache = true;
     private Map<String, String> config = new LinkedHashMap<>();
 
     public boolean isEnabled() {
@@ -43,5 +45,21 @@ public class GoldLapelProperties {
 
     public void setConfig(Map<String, String> config) {
         this.config = config;
+    }
+
+    public int getInvalidationPort() {
+        return invalidationPort;
+    }
+
+    public void setInvalidationPort(int invalidationPort) {
+        this.invalidationPort = invalidationPort;
+    }
+
+    public boolean isNativeCache() {
+        return nativeCache;
+    }
+
+    public void setNativeCache(boolean nativeCache) {
+        this.nativeCache = nativeCache;
     }
 }

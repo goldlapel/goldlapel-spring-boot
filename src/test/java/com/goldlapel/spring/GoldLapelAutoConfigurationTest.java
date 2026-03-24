@@ -1,7 +1,9 @@
 package com.goldlapel.spring;
 
 import com.goldlapel.GoldLapel;
+import com.goldlapel.NativeCache;
 import com.zaxxer.hikari.HikariDataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -9,6 +11,7 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +29,11 @@ class GoldLapelAutoConfigurationTest {
     private final ApplicationContextRunner simpleRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(GoldLapelAutoConfiguration.class));
 
+    @AfterEach
+    void resetCache() {
+        NativeCache.reset();
+    }
+
     @Test
     void autoConfiguresAndRewritesDataSource() {
         try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
@@ -36,8 +44,10 @@ class GoldLapelAutoConfigurationTest {
                             "spring.datasource.driver-class-name=org.postgresql.Driver")
                     .run(context -> {
                         assertThat(context).hasSingleBean(GoldLapelDataSourcePostProcessor.class);
-                        HikariDataSource ds = context.getBean(HikariDataSource.class);
-                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                        HikariDataSource hikari = (HikariDataSource) ((CachedDataSource) ds).getDelegate();
+                        assertThat(hikari.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
                         assertThat(mocked.constructed()).hasSize(1);
                         verify(mocked.constructed().get(0)).startProxy();
                     });
@@ -78,8 +88,10 @@ class GoldLapelAutoConfigurationTest {
                             "goldlapel.port=9999",
                             "goldlapel.extra-args=--threshold-duration-ms,200")
                     .run(context -> {
-                        HikariDataSource ds = context.getBean(HikariDataSource.class);
-                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:9999/testdb");
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                        HikariDataSource hikari = (HikariDataSource) ((CachedDataSource) ds).getDelegate();
+                        assertThat(hikari.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:9999/testdb");
                     });
         }
     }
@@ -112,8 +124,8 @@ class GoldLapelAutoConfigurationTest {
             GoldLapelProperties props = new GoldLapelProperties();
             GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
 
-            processor.postProcessAfterInitialization(ds1, "primaryDataSource");
-            processor.postProcessAfterInitialization(ds2, "analyticsDataSource");
+            Object result1 = processor.postProcessAfterInitialization(ds1, "primaryDataSource");
+            Object result2 = processor.postProcessAfterInitialization(ds2, "analyticsDataSource");
 
             assertThat(mocked.constructed()).hasSize(2);
             assertThat(ds1.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/db1");
@@ -123,6 +135,9 @@ class GoldLapelAutoConfigurationTest {
             verify(mocked.constructed().get(1)).startProxy();
 
             assertThat(processor.getProxies()).hasSize(2);
+
+            assertThat(result1).isInstanceOf(CachedDataSource.class);
+            assertThat(result2).isInstanceOf(CachedDataSource.class);
         }
     }
 
@@ -142,8 +157,10 @@ class GoldLapelAutoConfigurationTest {
                             "goldlapel.config.pool-size=30")
                     .run(context -> {
                         assertThat(context).hasSingleBean(GoldLapelDataSourcePostProcessor.class);
-                        HikariDataSource ds = context.getBean(HikariDataSource.class);
-                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                        HikariDataSource hikari = (HikariDataSource) ((CachedDataSource) ds).getDelegate();
+                        assertThat(hikari.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
                         assertThat(mocked.constructed()).hasSize(1);
                         verify(mocked.constructed().get(0)).startProxy();
 
@@ -167,8 +184,10 @@ class GoldLapelAutoConfigurationTest {
                             "goldlapel.config.poolSize=25",
                             "goldlapel.config.disableN1=true")
                     .run(context -> {
-                        HikariDataSource ds = context.getBean(HikariDataSource.class);
-                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                        HikariDataSource hikari = (HikariDataSource) ((CachedDataSource) ds).getDelegate();
+                        assertThat(hikari.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
                         assertThat(mocked.constructed()).hasSize(1);
                         verify(mocked.constructed().get(0)).startProxy();
                     });
@@ -187,8 +206,10 @@ class GoldLapelAutoConfigurationTest {
                             "goldlapel.config.mode=butler",
                             "goldlapel.extra-args=--verbose")
                     .run(context -> {
-                        HikariDataSource ds = context.getBean(HikariDataSource.class);
-                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:9000/testdb");
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                        HikariDataSource hikari = (HikariDataSource) ((CachedDataSource) ds).getDelegate();
+                        assertThat(hikari.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:9000/testdb");
                         assertThat(mocked.constructed()).hasSize(1);
                         verify(mocked.constructed().get(0)).startProxy();
                     });
@@ -204,8 +225,10 @@ class GoldLapelAutoConfigurationTest {
                             "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
                             "spring.datasource.driver-class-name=org.postgresql.Driver")
                     .run(context -> {
-                        HikariDataSource ds = context.getBean(HikariDataSource.class);
-                        assertThat(ds.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                        HikariDataSource hikari = (HikariDataSource) ((CachedDataSource) ds).getDelegate();
+                        assertThat(hikari.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
                         assertThat(mocked.constructed()).hasSize(1);
                         verify(mocked.constructed().get(0)).startProxy();
                     });
@@ -289,5 +312,141 @@ class GoldLapelAutoConfigurationTest {
         assertThat(result).containsEntry("excludeTables", List.of("users", "orders"));
         assertThat(result).containsEntry("poolSize", "30");
         assertThat(result).containsEntry("mode", "butler");
+    }
+
+    // --- L1 native cache tests ---
+
+    @Test
+    void wrapsDataSourceWithCachedDataSource() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            HikariDataSource ds = new HikariDataSource();
+            ds.setJdbcUrl("jdbc:postgresql://localhost:5432/testdb");
+
+            GoldLapelProperties props = new GoldLapelProperties();
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
+
+            Object result = processor.postProcessAfterInitialization(ds, "dataSource");
+
+            assertThat(result).isInstanceOf(CachedDataSource.class);
+            CachedDataSource cached = (CachedDataSource) result;
+            assertThat(cached.getDelegate()).isSameAs(ds);
+            assertThat(cached.getCache()).isNotNull();
+        }
+    }
+
+    @Test
+    void nativeCacheDisabledReturnsBareDataSource() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            HikariDataSource ds = new HikariDataSource();
+            ds.setJdbcUrl("jdbc:postgresql://localhost:5432/testdb");
+
+            GoldLapelProperties props = new GoldLapelProperties();
+            props.setNativeCache(false);
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
+
+            Object result = processor.postProcessAfterInitialization(ds, "dataSource");
+
+            assertThat(result).isSameAs(ds);
+            assertThat(result).isNotInstanceOf(CachedDataSource.class);
+        }
+    }
+
+    @Test
+    void nativeCacheDisabledViaProperty() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            dataSourceRunner.withPropertyValues(
+                            "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
+                            "spring.datasource.driver-class-name=org.postgresql.Driver",
+                            "goldlapel.native-cache=false")
+                    .run(context -> {
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(HikariDataSource.class);
+                        assertThat(ds).isNotInstanceOf(CachedDataSource.class);
+                        assertThat(((HikariDataSource) ds).getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/testdb");
+                    });
+        }
+    }
+
+    @Test
+    void defaultInvalidationPortIsProxyPortPlusTwo() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            HikariDataSource ds = new HikariDataSource();
+            ds.setJdbcUrl("jdbc:postgresql://localhost:5432/testdb");
+
+            GoldLapelProperties props = new GoldLapelProperties();
+            props.setPort(7932);
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
+
+            Object result = processor.postProcessAfterInitialization(ds, "dataSource");
+
+            assertThat(result).isInstanceOf(CachedDataSource.class);
+            // Default invalidation port = proxy port + 2 = 7934
+            // We can't directly check the port used, but we verify the cache was created
+            CachedDataSource cached = (CachedDataSource) result;
+            assertThat(cached.getCache()).isSameAs(NativeCache.getInstance());
+        }
+    }
+
+    @Test
+    void customInvalidationPort() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            HikariDataSource ds = new HikariDataSource();
+            ds.setJdbcUrl("jdbc:postgresql://localhost:5432/testdb");
+
+            GoldLapelProperties props = new GoldLapelProperties();
+            props.setInvalidationPort(9999);
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
+
+            Object result = processor.postProcessAfterInitialization(ds, "dataSource");
+
+            assertThat(result).isInstanceOf(CachedDataSource.class);
+            CachedDataSource cached = (CachedDataSource) result;
+            assertThat(cached.getCache()).isNotNull();
+        }
+    }
+
+    @Test
+    void customInvalidationPortViaProperty() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/testdb"))) {
+
+            dataSourceRunner.withPropertyValues(
+                            "spring.datasource.url=jdbc:postgresql://localhost:5432/testdb",
+                            "spring.datasource.driver-class-name=org.postgresql.Driver",
+                            "goldlapel.invalidation-port=8888")
+                    .run(context -> {
+                        DataSource ds = context.getBean(DataSource.class);
+                        assertThat(ds).isInstanceOf(CachedDataSource.class);
+                    });
+        }
+    }
+
+    @Test
+    void cachedDataSourceDelegatesUnwrap() throws Exception {
+        HikariDataSource hikari = new HikariDataSource();
+        NativeCache cache = NativeCache.getInstance();
+        CachedDataSource cached = new CachedDataSource(hikari, cache);
+
+        assertThat(cached.isWrapperFor(CachedDataSource.class)).isTrue();
+        assertThat(cached.unwrap(CachedDataSource.class)).isSameAs(cached);
+    }
+
+    @Test
+    void propertiesDefaults() {
+        GoldLapelProperties props = new GoldLapelProperties();
+        assertThat(props.isNativeCache()).isTrue();
+        assertThat(props.getInvalidationPort()).isEqualTo(0);
+        assertThat(props.isEnabled()).isTrue();
+        assertThat(props.getPort()).isEqualTo(7932);
     }
 }

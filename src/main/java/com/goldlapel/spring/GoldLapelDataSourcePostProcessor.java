@@ -1,6 +1,7 @@
 package com.goldlapel.spring;
 
 import com.goldlapel.GoldLapel;
+import com.goldlapel.NativeCache;
 import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +77,20 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
         log.info("Gold Lapel proxy started — {} now routes through localhost:{}", beanName, port);
 
-        return ds;
+        if (!properties.isNativeCache()) {
+            return ds;
+        }
+
+        int invPort = properties.getInvalidationPort();
+        if (invPort == 0) {
+            invPort = port + 2;
+        }
+        NativeCache cache = NativeCache.getInstance();
+        cache.connectInvalidation(invPort);
+
+        log.info("Gold Lapel L1 native cache enabled for {} (invalidation port {})", beanName, invPort);
+
+        return new CachedDataSource(ds, cache);
     }
 
     // Visible for testing
