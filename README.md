@@ -1,8 +1,8 @@
 # goldlapel-spring-boot-starter
 
-Spring Boot auto-configuration for [Gold Lapel](https://goldlapel.com) — the self-optimizing Postgres proxy.
+Spring Boot auto-configuration for [Gold Lapel](https://goldlapel.com) — the self-optimizing Postgres proxy. Includes L1 native cache — an in-process cache that serves repeated reads in microseconds with no TCP round-trip.
 
-Add the dependency and Gold Lapel starts automatically. Your existing `application.yml` datasource config works unchanged.
+Add the dependency and Gold Lapel starts automatically, with L1 cache enabled out of the box. Your existing `application.yml` datasource config works unchanged.
 
 ## Install
 
@@ -81,9 +81,9 @@ When Spring Boot creates a `HikariDataSource`, Gold Lapel's `BeanPostProcessor`:
 
 1. Strips `jdbc:` from the JDBC URL to get a standard PostgreSQL URL
 2. Starts the Gold Lapel proxy via [`GoldLapel.start()`](https://github.com/goldlapel/goldlapel-java)
-3. Rewrites the datasource URL to route through the proxy (`jdbc:postgresql://127.0.0.1:7932/...`)
+3. Returns a datasource URL routed through the proxy (`jdbc:postgresql://127.0.0.1:7932/...`) with L1 native cache active
 
-This happens before HikariCP opens any pool connections, so the rewrite is transparent. Everything else — JPA, JDBC, jOOQ, MyBatis — works exactly as before, just faster.
+This happens before HikariCP opens any pool connections, so the rewrite is transparent. Everything else — JPA, JDBC, jOOQ, MyBatis — works exactly as before, just faster. Repeated reads hit the L1 cache and return in microseconds without a TCP round-trip.
 
 ## License
 
