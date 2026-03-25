@@ -15,8 +15,8 @@
 
     <licenses>
         <license>
-            <name>Proprietary</name>
-            <url>https://goldlapel.com/license</url>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
         </license>
     </licenses>
 
