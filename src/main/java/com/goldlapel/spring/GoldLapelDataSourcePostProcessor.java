@@ -2,12 +2,13 @@ package com.goldlapel.spring;
 
 import com.goldlapel.GoldLapel;
 import com.goldlapel.NativeCache;
-import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -22,9 +23,15 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
     private final GoldLapelProperties properties;
     private final List<GoldLapel> proxies = new ArrayList<>();
+    // Track which upstream URLs have been assigned which port, so each unique
+    // upstream gets its own proxy instance while duplicate DataSources sharing
+    // the same upstream reuse the same proxy.
+    private final Map<String, Integer> upstreamPorts = new LinkedHashMap<>();
+    private int nextPort;
 
     public GoldLapelDataSourcePostProcessor(GoldLapelProperties properties) {
         this.properties = properties;
+        this.nextPort = properties.getPort();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             for (GoldLapel proxy : proxies) {
                 proxy.stopProxy();
@@ -34,18 +41,26 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-        if (!(bean instanceof HikariDataSource ds)) {
+        if (!(bean instanceof DataSource ds)) {
             return bean;
         }
 
-        String jdbcUrl = ds.getJdbcUrl();
-        if (jdbcUrl == null || !jdbcUrl.startsWith(JDBC_PG_PREFIX)) {
+        String jdbcUrl = extractJdbcUrl(ds);
+        if (jdbcUrl == null) {
+            return bean;
+        }
+
+        if (!jdbcUrl.startsWith(JDBC_PG_PREFIX)) {
             return bean;
         }
 
         String upstream = jdbcUrl.substring(JDBC_PREFIX.length());
 
-        int port = properties.getPort();
+        // Assign a unique port per unique upstream URL. If two DataSource beans
+        // point to the same upstream, they share a proxy. Otherwise each gets
+        // its own port so they don't collide.
+        int port = upstreamPorts.computeIfAbsent(upstream, k -> nextPort++);
+
         String extraArgsStr = properties.getExtraArgs();
         Map<String, String> configMap = properties.getConfig();
 
@@ -73,7 +88,7 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
 
         proxies.add(proxy);
         String proxyJdbcUrl = JDBC_PREFIX + proxyUrl;
-        ds.setJdbcUrl(proxyJdbcUrl);
+        setJdbcUrl(ds, proxyJdbcUrl);
 
         log.info("Gold Lapel proxy started — {} now routes through localhost:{}", beanName, port);
 
@@ -96,6 +111,50 @@ public class GoldLapelDataSourcePostProcessor implements BeanPostProcessor {
     // Visible for testing
     List<GoldLapel> getProxies() {
         return proxies;
+    }
+
+    // Visible for testing
+    Map<String, Integer> getUpstreamPorts() {
+        return upstreamPorts;
+    }
+
+    // Extract the JDBC URL from any DataSource implementation. Tries common
+    // getter methods used by HikariCP, Tomcat DBCP, C3P0, etc.
+    static String extractJdbcUrl(DataSource ds) {
+        // Try the most common getter names across popular pools
+        for (String methodName : new String[]{"getJdbcUrl", "getUrl", "getURL"}) {
+            try {
+                Method m = ds.getClass().getMethod(methodName);
+                Object result = m.invoke(ds);
+                if (result instanceof String url && !url.isEmpty()) {
+                    return url;
+                }
+            } catch (Exception ignored) {
+                // Method not found or not accessible — try the next one
+            }
+        }
+        log.warn("Gold Lapel: could not extract JDBC URL from DataSource bean of type {}. " +
+                "Gold Lapel proxy will not be applied. " +
+                "Supported pools: HikariCP, Tomcat DBCP, Commons DBCP2, C3P0.",
+                ds.getClass().getName());
+        return null;
+    }
+
+    // Set the JDBC URL on any DataSource implementation. Tries common setter
+    // methods used by HikariCP, Tomcat DBCP, C3P0, etc.
+    private static void setJdbcUrl(DataSource ds, String jdbcUrl) {
+        for (String methodName : new String[]{"setJdbcUrl", "setUrl", "setURL"}) {
+            try {
+                Method m = ds.getClass().getMethod(methodName, String.class);
+                m.invoke(ds, jdbcUrl);
+                return;
+            } catch (Exception ignored) {
+                // Method not found or not accessible — try the next one
+            }
+        }
+        log.warn("Gold Lapel: could not set JDBC URL on DataSource bean of type {}. " +
+                "The proxy URL may not be applied.",
+                ds.getClass().getName());
     }
 
     // Convert kebab-case keys to camelCase and coerce String values to their

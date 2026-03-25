@@ -111,7 +111,7 @@ class GoldLapelAutoConfigurationTest {
                     if (upstream.contains("5432")) {
                         when(mock.startProxy()).thenReturn("postgresql://localhost:7932/db1");
                     } else {
-                        when(mock.startProxy()).thenReturn("postgresql://localhost:7932/db2");
+                        when(mock.startProxy()).thenReturn("postgresql://localhost:7933/db2");
                     }
                 })) {
 
@@ -129,7 +129,7 @@ class GoldLapelAutoConfigurationTest {
 
             assertThat(mocked.constructed()).hasSize(2);
             assertThat(ds1.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/db1");
-            assertThat(ds2.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7932/db2");
+            assertThat(ds2.getJdbcUrl()).isEqualTo("jdbc:postgresql://localhost:7933/db2");
 
             verify(mocked.constructed().get(0)).startProxy();
             verify(mocked.constructed().get(1)).startProxy();
@@ -138,6 +138,33 @@ class GoldLapelAutoConfigurationTest {
 
             assertThat(result1).isInstanceOf(CachedDataSource.class);
             assertThat(result2).isInstanceOf(CachedDataSource.class);
+
+            // Each unique upstream gets its own port
+            assertThat(processor.getUpstreamPorts()).hasSize(2);
+            assertThat(processor.getUpstreamPorts().values()).containsExactly(7932, 7933);
+        }
+    }
+
+    @Test
+    void duplicateUpstreamReusesPort() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/db"))) {
+
+            HikariDataSource ds1 = new HikariDataSource();
+            ds1.setJdbcUrl("jdbc:postgresql://host:5432/db");
+
+            HikariDataSource ds2 = new HikariDataSource();
+            ds2.setJdbcUrl("jdbc:postgresql://host:5432/db");
+
+            GoldLapelProperties props = new GoldLapelProperties();
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
+
+            processor.postProcessAfterInitialization(ds1, "ds1");
+            processor.postProcessAfterInitialization(ds2, "ds2");
+
+            // Same upstream = same port = two proxy instances but both on port 7932
+            assertThat(processor.getUpstreamPorts()).hasSize(1);
+            assertThat(processor.getUpstreamPorts().values()).containsExactly(7932);
         }
     }
 
@@ -448,5 +475,89 @@ class GoldLapelAutoConfigurationTest {
         assertThat(props.getInvalidationPort()).isEqualTo(0);
         assertThat(props.isEnabled()).isTrue();
         assertThat(props.getPort()).isEqualTo(7932);
+    }
+
+    // --- DataSource type agnostic tests ---
+
+    @Test
+    void extractJdbcUrlFromHikari() {
+        HikariDataSource ds = new HikariDataSource();
+        ds.setJdbcUrl("jdbc:postgresql://host:5432/db");
+        assertThat(GoldLapelDataSourcePostProcessor.extractJdbcUrl(ds)).isEqualTo("jdbc:postgresql://host:5432/db");
+    }
+
+    @Test
+    void extractJdbcUrlFromGetUrl() {
+        // Simulates a DataSource with getUrl() (e.g., Tomcat DBCP)
+        DataSource ds = new DataSourceWithGetUrl("jdbc:postgresql://host:5432/db");
+        assertThat(GoldLapelDataSourcePostProcessor.extractJdbcUrl(ds)).isEqualTo("jdbc:postgresql://host:5432/db");
+    }
+
+    @Test
+    void extractJdbcUrlReturnsNullForUnknown() {
+        // A DataSource with no URL getter methods
+        DataSource ds = mock(DataSource.class);
+        assertThat(GoldLapelDataSourcePostProcessor.extractJdbcUrl(ds)).isNull();
+    }
+
+    @Test
+    void worksWithNonHikariDataSource() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class,
+                (mock, context) -> when(mock.startProxy()).thenReturn("postgresql://localhost:7932/db"))) {
+
+            DataSourceWithGetUrl ds = new DataSourceWithGetUrl("jdbc:postgresql://host:5432/db");
+
+            GoldLapelProperties props = new GoldLapelProperties();
+            props.setNativeCache(false);
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(props);
+
+            Object result = processor.postProcessAfterInitialization(ds, "dataSource");
+
+            assertThat(mocked.constructed()).hasSize(1);
+            verify(mocked.constructed().get(0)).startProxy();
+            assertThat(ds.getUrl()).isEqualTo("jdbc:postgresql://localhost:7932/db");
+            assertThat(result).isSameAs(ds);
+        }
+    }
+
+    @Test
+    void skipsNonDataSourceBeans() {
+        try (MockedConstruction<GoldLapel> mocked = mockConstruction(GoldLapel.class)) {
+            GoldLapelDataSourcePostProcessor processor = new GoldLapelDataSourcePostProcessor(
+                    new GoldLapelProperties());
+
+            Object bean = "not a datasource";
+            Object result = processor.postProcessAfterInitialization(bean, "myBean");
+
+            assertThat(result).isSameAs(bean);
+            assertThat(mocked.constructed()).isEmpty();
+        }
+    }
+
+    // Minimal DataSource with getUrl()/setUrl() — simulates Tomcat DBCP pattern
+    static class DataSourceWithGetUrl implements DataSource {
+        private String url;
+
+        DataSourceWithGetUrl(String url) {
+            this.url = url;
+        }
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
+
+        @Override public java.sql.Connection getConnection() { return null; }
+        @Override public java.sql.Connection getConnection(String u, String p) { return null; }
+        @Override public java.io.PrintWriter getLogWriter() { return null; }
+        @Override public void setLogWriter(java.io.PrintWriter out) {}
+        @Override public void setLoginTimeout(int seconds) {}
+        @Override public int getLoginTimeout() { return 0; }
+        @Override public java.util.logging.Logger getParentLogger() { return null; }
+        @Override public <T> T unwrap(Class<T> iface) { return null; }
+        @Override public boolean isWrapperFor(Class<?> iface) { return false; }
     }
 }
